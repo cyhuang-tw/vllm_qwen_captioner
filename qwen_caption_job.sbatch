@@ -16,7 +16,8 @@ AUDIO_SCP="${AUDIO_SCP:?need AUDIO_SCP}"
 OUT_DIR="${OUT_DIR:-$PWD/out}"
 PORT="${PORT:-8901}"
 TP_SIZE="${TP_SIZE:-1}"
-MAX_WORKERS="${MAX_WORKERS:-4}"
+MAX_WORKERS="${MAX_WORKERS:-2000}"
+MAX_QUEUE_SIZE="${MAX_QUEUE_SIZE:-999999}"
 MODEL="Qwen/Qwen3-Omni-30B-A3B-Captioner"
 
 mkdir -p "$OUT_DIR"
@@ -26,7 +27,7 @@ echo "GPU(s): ${CUDA_VISIBLE_DEVICES:-unset}"
 echo "Image: $SIF_IMG"
 echo "Audio SCP: $AUDIO_SCP"
 echo "OUT_DIR=$OUT_DIR"
-echo "PORT=$PORT  TP_SIZE=$TP_SIZE  MAX_WORKERS=$MAX_WORKERS"
+echo "PORT=$PORT  TP_SIZE=$TP_SIZE  MAX_WORKERS=$MAX_WORKERS  MAX_QUEUE_SIZE=$MAX_QUEUE_SIZE"
 echo "================="
 
 # === define helper for apptainer ===
@@ -60,8 +61,12 @@ print("Server deps OK")
 PY
 
 # === step 2: launch vLLM server ===
+# Force vLLM v0 API (stable, v1 is experimental and buggy in 0.9.3)
+export VLLM_USE_V1=0
+
 appt bash -lc "
   set -e
+  export VLLM_USE_V1=0
   vllm serve ${MODEL} \
     --host 0.0.0.0 --port ${PORT} \
     --max-model-len 32768 \
@@ -110,7 +115,12 @@ python3 -u client_caption_wavscp.py \
   --out-jsonl "$OUT_DIR/captions-${SLURM_JOB_ID}.jsonl" \
   --out-tsv "$OUT_DIR/captions-${SLURM_JOB_ID}.tsv" \
   --max-workers "$MAX_WORKERS" \
-  --timeout 180
+  --timeout 180 \
+  --resume \
+  --max-retries 3 \
+  --checkpoint-interval 100 \
+  --max-queue-size "$MAX_QUEUE_SIZE" \
+  --queue-check-interval 2.0
 
 echo "All done."
 
