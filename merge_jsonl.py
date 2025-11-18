@@ -20,6 +20,11 @@ def parse_args():
         help="Input JSONL files to merge (glob patterns supported)"
     )
     ap.add_argument(
+        "--key-field",
+        default="utt",
+        help="Record key field to de-duplicate on (default: utt). Use 'idx' for arkive outputs."
+    )
+    ap.add_argument(
         "--output",
         "-o",
         required=True,
@@ -63,7 +68,7 @@ def load_jsonl_records(file_path):
     return records
 
 
-def merge_records(all_records, prefer_success=True):
+def merge_records(all_records, key_field="utt", prefer_success=True):
     """
     Merge records, handling duplicates.
 
@@ -71,19 +76,20 @@ def merge_records(all_records, prefer_success=True):
     - If prefer_success=True: keep first successful result for each utt, or last failed attempt
     - Otherwise: keep the last record for each utt
     """
-    # Group by utterance ID
+    # Group by key (utt or idx)
     utt_records = defaultdict(list)
     for record in all_records:
-        utt = record.get("utt")
-        if utt:
-            utt_records[utt].append(record)
+        key = record.get(key_field)
+        if key is not None:
+            utt_records[key].append(record)
 
     merged = {}
     stats = {
         "total_utts": len(utt_records),
         "successful": 0,
         "failed": 0,
-        "duplicates_resolved": 0
+        "duplicates_resolved": 0,
+        "missing_key": len(all_records) - sum(len(v) for v in utt_records.values()),
     }
 
     for utt, records in utt_records.items():
@@ -160,7 +166,7 @@ def main():
     print(f"\nTotal records loaded: {len(all_records)}")
 
     # Merge records
-    merged, stats = merge_records(all_records, prefer_success=args.prefer_success)
+    merged, stats = merge_records(all_records, key_field=args.key_field, prefer_success=args.prefer_success)
 
     # Write outputs
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
@@ -173,6 +179,8 @@ def main():
     print(f"Successful: {stats['successful']}")
     print(f"Failed: {stats['failed']}")
     print(f"Duplicates resolved: {stats['duplicates_resolved']}")
+    if stats["missing_key"]:
+        print(f"Missing key '{args.key_field}' in {stats['missing_key']} records (skipped)")
     print(f"\nOutput written to:")
     print(f"  {args.output}")
     if args.output_tsv:
